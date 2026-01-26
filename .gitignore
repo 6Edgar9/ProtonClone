@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+venv/
+.env
+
+server_storage/
+Descargas_Proton/
+contacts*.json
+*.enc
+*.log
+
+*.db
+*.sqlite3
