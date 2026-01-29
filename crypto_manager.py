@@ -101,3 +101,31 @@ class CryptoManager:
     def decrypt_file(self, encrypted_data: bytes, my_private_key) -> bytes:
         """Alias para mantener compatibilidad con código anterior"""
         return self.decrypt_bytes(encrypted_data, my_private_key)
+    def sign_data(self, data: bytes, my_private_key) -> bytes:
+        """Crea una firma digital para los datos usando tu llave privada"""
+        signature = my_private_key.sign(
+            data,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        return signature
+
+    def verify_signature(self, data: bytes, signature: bytes, sender_public_key_pem: bytes) -> bool:
+        """Verifica si la firma corresponde a los datos y al remitente"""
+        try:
+            sender_public_key = self.load_public_key(sender_public_key_pem)
+            sender_public_key.verify(
+                signature,
+                data,
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                hashes.SHA256()
+            )
+            return True # Firma válida
+        except Exception:
+            return False # Firma inválida (o datos alterados)

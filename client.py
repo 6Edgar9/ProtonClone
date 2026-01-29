@@ -339,9 +339,16 @@ def menu_enviar():
                 if texto_mensaje:
                     print("🔒 Cifrando texto...")
                     enc_bytes = crypto.encrypt_bytes_for_user(texto_mensaje.encode("utf-8"), pub_key)
-                    # Convertimos a string base64 para enviarlo
+                    
+                    # --- FIRMAR TEXTO ---
+                    print("✍️  Firmando texto digitalmente...")
+                    sig_bytes = crypto.sign_data(enc_bytes, MY_PRIVATE_KEY)
+                    sig_str = base64.b64encode(sig_bytes).decode('utf-8')
+                    # --------------------
+
                     enc_str = base64.b64encode(enc_bytes).decode('utf-8')
                     payload_data["encrypted_text"] = enc_str
+                    payload_data["text_signature"] = sig_str
 
                 # 3. Cifrar Archivo (si el usuario seleccionó uno)
                 # AQUÍ ESTABA EL ERROR: RESTAURAMOS LA DEFINICIÓN DE VARIABLES
@@ -358,6 +365,12 @@ def menu_enviar():
                     
                     # Lo preparamos para enviar
                     payload_files["file"] = (real_name, open(temp_file, "rb"))
+                    
+                    # --- FIRMAR ARCHIVO ---
+                    print("✍️  Firmando archivo digitalmente...")
+                    file_sig_bytes = crypto.sign_data(enc_file_bytes, MY_PRIVATE_KEY)
+                    file_sig_str = base64.b64encode(file_sig_bytes).decode('utf-8')
+                    payload_data["file_signature"] = file_sig_str
 
                 # === EL ARREGLO MÁGICO (ARCHIVO FANTASMA) ===
                 # Si NO hay archivo real, enviamos uno vacío para que FastAPI no se queje.
@@ -403,7 +416,7 @@ def menu_enviar():
 
         elif op == "5": break
 
-# --- MENÚ DE BANDEJA (COMPLETO) ---
+# --- MENÚ DE BANDEJA (CON VERIFICACIÓN DE FIRMA DIGITAL) ---
 def menu_bandeja():
     while True:
         header("📬 BANDEJA DE ENTRADA")
@@ -423,8 +436,9 @@ def menu_bandeja():
                 print("2. 🔙 Volver")
                 if input("\nElige: ") == "2": break
                 continue
-
+                
             # --- LISTADO DE MENSAJES ---
+            # Nota: Si actualizaste el servidor, podrías mostrar también el REMITENTE aquí
             print(f"{'ID':<5} | {'TIPO':<8} | {'ASUNTO / CONTENIDO'}")
             print("-" * 65)
             
@@ -453,14 +467,11 @@ def menu_bandeja():
             print("\n👇 OPCIONES:")
             print("1. 👁️  Leer mensaje completo (Texto y Adjuntos)")
             print("2. 🗑️  Eliminar mensaje")
-            print("3. ☢️  VACIAR BANDEJA") # <--- ¡RESTAURADO!
+            print("3. ☢️  VACIAR BANDEJA") 
             print("4. 🔙 Volver")
 
             op = input("\nElige (1-4): ")
-
-            # =========================================================
-            # OPCIÓN 1: LECTOR 
-            # =========================================================
+            
             if op == "1":
                 target_id_str = input("👉 ID del mensaje: ")
                 if not target_id_str.isdigit(): continue
@@ -471,13 +482,48 @@ def menu_bandeja():
                 if msg:
                     header(f"VISOR DE MENSAJE #{target_id}")
                     
-                    tiene_texto = bool(msg.get('encrypted_text'))
-                    tiene_archivo = bool(msg.get('filename'))
-                    print(f"Estado: [Texto: {'✅' if tiene_texto else '❌'}] [Archivo: {'✅' if tiene_archivo else '❌'}]")
+                    # 1. IDENTIFICAR REMITENTE Y OBTENER LLAVE PÚBLICA
+                    sender = msg.get('sender_username')
+                    sender_pub_key = None
+                    
+                    if sender:
+                        print(f"📨 REMITENTE: {sender}")
+                        try:
+                            # Bajamos la llave pública del que dice ser el remitente
+                            kres = requests.get(f"{SERVER}/get-public-key/{sender}", headers={"Authorization": f"Bearer {TOKEN}"})
+                            if kres.status_code == 200:
+                                sender_pub_key = kres.json()["public_key"].encode()
+                            else:
+                                print("⚠️  No se pudo obtener la llave pública del remitente.")
+                        except:
+                            print("⚠️  Error de conexión al verificar remitente.")
+                    else:
+                        print("📨 REMITENTE: Desconocido (Sistema antiguo)")
+
                     print("-" * 50)
 
+                    tiene_texto = bool(msg.get('encrypted_text'))
+                    tiene_archivo = bool(msg.get('filename'))
+                    
+                    # --- BLOQUE A: VERIFICAR Y MOSTRAR TEXTO ---
                     if tiene_texto:
                         print("📝 CONTENIDO DE TEXTO:")
+                        
+                        # A.1 VERIFICAR FIRMA DEL TEXTO
+                        estado_firma = "⚠️ Sin Firma"
+                        if sender_pub_key and msg.get('text_signature'):
+                            try:
+                                enc_bytes_verify = base64.b64decode(msg['encrypted_text'])
+                                sig_bytes_verify = base64.b64decode(msg['text_signature'])
+                                if crypto.verify_signature(enc_bytes_verify, sig_bytes_verify, sender_pub_key):
+                                    estado_firma = "✅ FIRMA VÁLIDA (Auténtico)"
+                                else:
+                                    estado_firma = "❌ ⚠️ FIRMA INVÁLIDA (PELIGRO)"
+                            except: estado_firma = "❌ Error validando"
+                        
+                        print(f"   Estado de Seguridad: {estado_firma}")
+
+                        # A.2 DESCIFRAR
                         try:
                             enc_bytes = base64.b64decode(msg['encrypted_text'])
                             dec_bytes = crypto.decrypt_bytes(enc_bytes, MY_PRIVATE_KEY)
@@ -495,19 +541,43 @@ def menu_bandeja():
                     else:
                         print("📝 (Sin texto)")
 
+                    # --- BLOQUE B: VERIFICAR Y DESCARGAR ARCHIVO ---
                     if tiene_archivo:
                         fname = msg['filename']
                         print(f"\n📎 ARCHIVO ADJUNTO: {fname}")
-                        if input("   ¿Descargar? (s/n): ").lower() == 's':
+                        
+                        # B.1 AVISO DE FIRMA (PREVIO A DESCARGA)
+                        if msg.get('file_signature'):
+                            print("   🔐 Este archivo está firmado digitalmente.")
+                        else:
+                            print("   ⚠️ Este archivo NO tiene firma.")
+
+                        if input("   ¿Descargar y Verificar? (s/n): ").lower() == 's':
                             r = requests.get(f"{SERVER}/download/{target_id}", headers={"Authorization": f"Bearer {TOKEN}"})
                             if r.status_code == 200:
-                                try:
-                                    dec_file = crypto.decrypt_bytes(r.content, MY_PRIVATE_KEY)
-                                    os.makedirs("Descargas_Proton", exist_ok=True)
-                                    path = os.path.join("Descargas_Proton", "DEC_" + fname)
-                                    with open(path, "wb") as f: f.write(dec_file)
-                                    print(f"   ✅ Guardado en: {path}")
-                                except: print("   ❌ Error al descifrar archivo.")
+                                # B.2 VERIFICAR FIRMA DEL ARCHIVO (Sobre los datos cifrados descargados)
+                                firma_ok = True
+                                if sender_pub_key and msg.get('file_signature'):
+                                    try:
+                                        sig_file_bytes = base64.b64decode(msg['file_signature'])
+                                        # r.content son los bytes cifrados tal cual llegaron
+                                        if crypto.verify_signature(r.content, sig_file_bytes, sender_pub_key):
+                                            print("   ✅ FIRMA DEL ARCHIVO: VÁLIDA")
+                                        else:
+                                            print("   ❌ ⚠️ FIRMA DEL ARCHIVO: INVÁLIDA (El archivo fue alterado)")
+                                            firma_ok = False
+                                    except:
+                                        print("   ❌ Error técnico verificando firma.")
+                                        firma_ok = False
+                                
+                                if firma_ok or input("   ⚠️ La firma falló. ¿Guardar de todos modos? (s/n): ") == 's':
+                                    try:
+                                        dec_file = crypto.decrypt_bytes(r.content, MY_PRIVATE_KEY)
+                                        os.makedirs("Descargas_Proton", exist_ok=True)
+                                        path = os.path.join("Descargas_Proton", "DEC_" + fname)
+                                        with open(path, "wb") as f: f.write(dec_file)
+                                        print(f"   ✅ Guardado en: {path}")
+                                    except: print("   ❌ Error al descifrar archivo.")
                             else: print("   ❌ Error descarga.")
                     
                     print("-" * 50)
@@ -524,7 +594,7 @@ def menu_bandeja():
                 print("🗑️  Borrado.")
                 time.sleep(0.5)
 
-            # OPCIÓN 3: VACIAR TODO (RESTAURADA)
+            # OPCIÓN 3: VACIAR TODO
             elif op == "3":
                 if input("⚠️  ¿BORRAR TODO? (s/n): ").lower() == 's':
                     requests.delete(f"{SERVER}/empty-inbox/", headers={"Authorization": f"Bearer {TOKEN}"})
