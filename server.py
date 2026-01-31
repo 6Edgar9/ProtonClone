@@ -75,6 +75,8 @@ async def upload_message(
     recipient_username: str,
     file: Optional[UploadFile] = File(None),
     encrypted_text: Optional[str] = Form(None),
+    text_signature: Optional[str] = Form(None),
+    file_signature: Optional[str] = Form(None),
     current_user: User = Depends(get_current_user), 
     session: Session = Depends(get_session)
 ):
@@ -100,13 +102,16 @@ async def upload_message(
     db_msg = FileRecord(
         owner_id=recipient.id,
         encrypted_text=encrypted_text,
+        text_signature=text_signature,
         filename=original_filename,
-        stored_name=stored_filename
+        stored_name=stored_filename,
+        file_signature=file_signature,
+        sender_username=current_user.username
     )
     
     session.add(db_msg)
     session.commit()
-    return {"info": "Mensaje enviado exitosamente", "id": db_msg.id}
+    return {"info": "Enviado", "id": db_msg.id}
 
 @app.get("/my-files/")
 def list_files(user: User = Depends(get_current_user), session: Session = Depends(get_session)):

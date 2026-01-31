@@ -18,12 +18,15 @@ class FileRecord(SQLModel, table=True):
     # Metadatos
     created_at: datetime = Field(default_factory=datetime.utcnow)
     owner_id: int = Field(foreign_key="user.id")
+    sender_username: str
     
-    # Contenido Híbrido (Todo opcional porque un mensaje puede ser solo texto o solo archivo)
-    encrypted_text: Optional[str] = None # El mensaje de texto cifrado (en Base64)
+    # Contenido Híbrido
+    encrypted_text: Optional[str] = None
+    text_signature: Optional[str] = None # <--- NUEVO: Firma del texto
     
-    filename: Optional[str] = None       # Nombre original del archivo (si hay adjunto)
-    stored_name: Optional[str] = None    # Nombre en disco del archivo (si hay adjunto)
+    filename: Optional[str] = None
+    stored_name: Optional[str] = None
+    file_signature: Optional[str] = None # <--- NUEVO: Firma del archivo
 
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
