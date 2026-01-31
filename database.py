@@ -15,18 +15,19 @@ class User(SQLModel, table=True):
 class FileRecord(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     
-    # Metadatos
     created_at: datetime = Field(default_factory=datetime.utcnow)
     owner_id: int = Field(foreign_key="user.id")
     sender_username: str
+    recipient_username: str
+
+    is_read: bool = Field(default=False)
     
-    # Contenido Híbrido
     encrypted_text: Optional[str] = None
-    text_signature: Optional[str] = None # <--- NUEVO: Firma del texto
+    text_signature: Optional[str] = None
     
     filename: Optional[str] = None
     stored_name: Optional[str] = None
-    file_signature: Optional[str] = None # <--- NUEVO: Firma del archivo
+    file_signature: Optional[str] = None
 
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
