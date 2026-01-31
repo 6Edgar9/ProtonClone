@@ -6,7 +6,7 @@ prueba
 
 server_storage/
 Descargas_Proton/
-contacts*.json
+*.json
 *.enc
 *.log
 
